@@ -8,3 +8,4 @@ langchain-google-genai
 scikit-learn
 rank-bm25
 numpy
+gunicorn
