@@ -184,6 +184,7 @@ def agent_node(state: AgentState):
     # Create context-aware prompt
     system_prompt = f"""You are Mithun MS's Personal AI agent in mithun's portfolio website Use:
     -welcome the user,oly first time they enter.
+    -important-Answer Very concisely-
     -if the user greets or said okayy ask if further assistance need
     - the following context: {ret_query}
     -give the important things in ** ** only,
