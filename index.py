@@ -41,4 +41,4 @@ def send_chat_message():
 
 if __name__ == '__main__':
     logger.info("Starting Flask server...")
-    app.run(debug=False)
+    app.run(debug=True)
