@@ -1,0 +1,8 @@
+langchain
+langgraph
+langchain-google-genai
+scikit-learn
+rank-bm25
+numpy
+operator
+typing_extensions
