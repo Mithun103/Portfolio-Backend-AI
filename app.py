@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # ✅ Allow only your Netlify frontend to access the API
-CORS(app, origins=["https://mithunms.netlify.app"])
+CORS(app, origins=[
+    "https://mithunms.netlify.app",
+    "http://localhost:3000"
+])
 
 @app.route('/')
 def home():
