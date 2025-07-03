@@ -1,17 +1,19 @@
+
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain.memory import ConversationBufferWindowMemory
-from typing import TypedDict, List
-import json
+from typing import TypedDict
 from sklearn.feature_extraction.text import TfidfVectorizer
 from rank_bm25 import BM25Okapi
 import numpy as np
 
-# Define your personal data
+# ---------------- RESUME DATA ----------------
 documents = []
 metadata = []
-resume_json={
+
+# 🔽 Include your resume JSON here directly or import from a separate file
+resume_json = {
   "personal_info": {
     "name": "Mithun MS",
     "title": "Artificial Intelligence and Machine Learning Engineer",
@@ -102,7 +104,7 @@ resume_json={
     "IBM Z Datathon",
     "Industrial AI Hackathon (IIT Madras)"
   ]
-}
+} # OR paste your resume_json directly above
 
 for section, details in resume_json.items():
     if isinstance(details, dict):
@@ -130,120 +132,87 @@ for section, details in resume_json.items():
                 documents.append(text)
                 metadata.append({"category": section, "key": section})
 
-# 🔍 **Step 1: TF-IDF Vectorization**
+# ------------------ RAG Setup ------------------
 vectorizer = TfidfVectorizer()
 tfidf_matrix = vectorizer.fit_transform(documents)
-
-# 🔍 **Step 2: BM25 Tokenization**
 tokenized_corpus = [doc.lower().split() for doc in documents]
 bm25 = BM25Okapi(tokenized_corpus)
 
-# 🔎 **Combined Retrieval Function**
 def retrieve_documents(query, top_k=100):
-    # Tokenize query for BM25
     tokenized_query = query.lower().split()
-    
-    # Compute BM25 scores
     bm25_scores = np.array(bm25.get_scores(tokenized_query))
-    
-    # Compute TF-IDF scores
     query_vector = vectorizer.transform([query])
     tfidf_scores = np.array((tfidf_matrix @ query_vector.T).toarray()).flatten()
-    
-    # Combine Scores: Weighted Sum (You can adjust weights)
     combined_scores = (0.7 * bm25_scores) + (0.3 * tfidf_scores)
-    
-    # Get top K results
     ranked_indices = combined_scores.argsort()[-top_k:][::-1]
-    
     return [documents[i] for i in ranked_indices], [metadata[i] for i in ranked_indices]
 
-# Define the State
-
-
-# Configuration
+# ------------------ Agent Setup ------------------
 MEMORY_WINDOW_SIZE = 8
+
 class AgentState(TypedDict):
     memory: ConversationBufferWindowMemory
     user_query: str
 
-# Initialize AI with personal agent persona
-personal_ai = ChatGoogleGenerativeAI(
+# ✅ Use Groq + LLaMA3
+personal_ai = ChatGroq(
     temperature=0.3,
-    model="gemini-2.0-flash-exp",
-    api_key="AIzaSyCs0xVuwDon6SC6c84VwdSv3txrkludhJo"
+    model="llama3-70b-8192",  # or "mixtral-8x7b-32768"
+    api_key="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"  # Set securely via env var in production
 )
 
 def agent_node(state: AgentState):
     memory = state["memory"]
     query = state["user_query"]
-    
-    # Retrieve relevant resume data
     ret_query, _ = retrieve_documents(query)
-    
-    # Create context-aware prompt
-    system_prompt = f"""You are Mithun MS's Personal AI agent in mithun's portfolio website Use:
-    -welcome the user,oly first time they enter.
-    -important-Answer Very concisely-
-    -if the user greets or said okayy ask if further assistance need
-    - the following context: {ret_query}
-    -give the important things in ** ** only,
-    - Conversation history: {memory.buffer}
-    -Answer the Queries detaily and concisely,by reading the Convo history very carefully dont mislead any info.
-    -answer with all possible outcomes
-    -act according to User's reply
-    Rules:
-    1. Answer strictly using provided data and use your knowledge only to capture the intention and treat them
-    2. Be professional but friendly
-    3. For unknown queries: "I don't have that information\""""
-    
-    # Generate response with memory context
+
+    convo_history = "".join([f"{m.type.upper()}: {m.content}\n" for m in memory.chat_memory.messages])
+
+    system_prompt = f"""
+You are **Mithun MS's Personal AI Assistant**, designed to represent his portfolio in a smart and conversational way.
+
+🎯 Objective:
+- Act like a polite and professional assistant representing Mithun.
+- Use only the **provided resume data** to answer queries.
+- Avoid hallucinating or assuming anything beyond the data.
+
+📄 Context (retrieved data): {ret_query}
+
+🧠 Conversation so far:
+{convo_history}
+
+📌 Rules:
+1. Greet the user only during their first message with a warm welcome.
+2. Always answer **concisely**, but with enough clarity and completeness.
+3. Use **bold styling (with asterisks)** to highlight important information.
+4. If the question involves vague or missing information, reply: *"I don't have that information."*
+5. If the user says “ok”, “thanks”, or similar, ask: *“Would you like to know anything else about Mithun?”*
+6. Your tone must be **friendly, crisp, and helpful**, like a real-time portfolio assistant.
+
+Begin every response from the user’s perspective and ensure the tone matches their intent.
+"""
+
     response = personal_ai.invoke([
         AIMessage(content=system_prompt),
         HumanMessage(content=query)
     ])
-    
-    # Update memory
+
     memory.save_context({"input": query}, {"output": response.content})
-    
     return {"memory": memory}
 
-# Build the workflow
 workflow = StateGraph(AgentState)
 workflow.add_node("agent", agent_node)
 workflow.set_entry_point("agent")
 workflow.add_edge("agent", END)
-app = workflow.compile()
+compiled_app = workflow.compile()
 
-# Enhanced interface with LangChain memory
-def personal_ai_agent(query: str, memory: ConversationBufferWindowMemory = None):
-    # Initialize memory if None
-    if not memory:
-        memory = ConversationBufferWindowMemory(k=MEMORY_WINDOW_SIZE, return_messages=True)
-    
-    # Run through workflow
-    result = app.invoke({
+# ------------------ Main Entry for Flask ------------------
+def personal_ai_agent(query: str, memory: ConversationBufferWindowMemory):
+    result = compiled_app.invoke({
         "memory": memory,
         "user_query": query
     })
-    
     return {
         "response": result["memory"].chat_memory.messages[-1].content,
         "new_memory": result["memory"]
     }
-def ask(question):
-        
-        global current_memory
-        current_memory = None
-        result = personal_ai_agent(question, current_memory)
-        current_memory = result["new_memory"]
-        return result["response"]
-if __name__ == "__main__":
-    # Conversation simulation
-
-    
-    
-    
-    ask("What internships have I done?")
-    ask("What technologies did I use there?")
-    ask("How does that relate to my education?")
