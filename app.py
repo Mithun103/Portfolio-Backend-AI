@@ -1,10 +1,6 @@
-# app.py
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
-from langchain.memory import ConversationBufferWindowMemory
-from typing import Dict
 from agent import personal_ai_agent
 
 # Logging setup
@@ -18,32 +14,31 @@ CORS(app, origins=[
     "http://192.168.133.222:8080"
 ])
 
-# In-memory store
-session_memory_store: Dict[str, ConversationBufferWindowMemory] = {}
-MEMORY_WINDOW_SIZE = 8
-
 @app.route('/')
 def home():
+    """A simple health check endpoint."""
     return jsonify({'message': 'Server is running'}), 200
 
 @app.route('/api/chat', methods=['POST'])
 def send_chat_message():
+    """
+    Receives a chat message, passes it to the AI agent,
+    and returns the agent's response. This endpoint is stateless.
+    """
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'error': "Invalid JSON"}), 400
+
         message = data.get('message')
-        session_id = data.get('session_id')
 
-        if not message or not session_id:
-            return jsonify({'error': "Missing message or session_id"}), 400
+        # Validate that a message was provided
+        if not message:
+            return jsonify({'error': "Missing 'message' in request body"}), 400
 
-        if session_id not in session_memory_store:
-            session_memory_store[session_id] = ConversationBufferWindowMemory(
-                k=MEMORY_WINDOW_SIZE,
-                return_messages=True
-            )
-
-        memory = session_memory_store[session_id]
-        result = personal_ai_agent(message, memory)
+        # The agent is now called without memory.
+        # This assumes the `personal_ai_agent` function can handle a single argument.
+        result = personal_ai_agent(message)
 
         return jsonify({'response': result["response"]}), 200
 
@@ -56,4 +51,5 @@ def send_chat_message():
 
 if __name__ == '__main__':
     logger.info("🚀 Starting Flask server...")
+    # Use debug=False in a production environment
     app.run(debug=True)
