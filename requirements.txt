@@ -9,4 +9,5 @@ scikit-learn
 rank-bm25
 numpy
 redis
+langchain_community
 gunicorn
