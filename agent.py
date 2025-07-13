@@ -4,15 +4,23 @@ import numpy as np
 from dotenv import load_dotenv
 from typing import TypedDict, List, Dict, Any
 
+
+# --- Imports for Redis History ---
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.messages import BaseMessage
+from langchain_core.prompts import ChatPromptTemplate # Import ChatPromptTemplate
+
+
+# --- Existing Imports ---
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_groq import ChatGroq
-from langchain.memory import ConversationBufferWindowMemory
 from sklearn.feature_extraction.text import TfidfVectorizer
 from rank_bm25 import BM25Okapi
 
 # --- Setup Logging ---
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # --- Load Environment Variables ---
@@ -20,255 +28,228 @@ load_dotenv()
 
 # --- Constants ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY environment variable not set.")
 
-MEMORY_WINDOW_SIZE = 8
 TOP_K_RETRIEVAL = 8
 BM25_WEIGHT = 0.7
 TFIDF_WEIGHT = 0.3
 LLM_MODEL = "llama3-70b-8192"
 LLM_TEMPERATURE = 0.3
 
-# --- Resume Data ---
-# In a real application, it's better to load this from a separate JSON file.
-resume_json = {
-    "personal_info": {
-      "name": "Mithun MS",
-      "title": "Artificial Intelligence and Machine Learning Engineer",
-      "location": "Porur, Chennai",
-      "email": "mithun2004vgs@gmail.com",
-      "phone": "+91 8637670755",
-      "linkedin": "www.linkedin.com/in/mithun-ms-5836b3297/",
-      "github": "github.com/Mithun103",
-      "website": "mithunms.netlify.app"
+# --- Resume Data (omitted for brevity, same as before) ---
+resume_json ={
+    
+  "personal_info": {
+    "name": "Mithun MS",
+    "title": "Artificial Intelligence and Machine Learning Engineer",
+    "location": "Porur, Chennai",
+    "email": "mithun2004vgs@gmail.com",
+    "phone": "+91 8637670755",
+    "linkedin": "https://www.linkedin.com/in/msmithun/",
+    "github": "https://github.com/Mithun103",
+    "website": "https://mithunms.netlify.app",
+    "leetcode": "https://leetcode.com/u/mithun103/"
+  },
+  "summary": "AI/ML Engineer passionate about building smart, scalable systems and understanding the 'why' behind the code. Skilled in Python, PyTorch, TensorFlow, LLMs, and LangChain with hands-on experience in Transformer architectures, attention mechanisms, RAG pipelines, and multilingual OCR systems. Strong intuition-driven approach to solving real-world problems using GenAI, neural networks, and agent-based architectures.",
+  "skills": {
+    "technical": {
+      "languages": ["Python", "C", "Java"],
+      "frameworks": ["TensorFlow", "PyTorch", "Scikit-learn", "HuggingFace Transformers", "LangChain", "Flask", "React.js", "Gradio", "n8n"],
+      "ai_ml": [
+        "Deep Learning", "Neural Networks", "Transformer Architecture", "LLMs", "LoRA Fine-Tuning", "Natural Language Processing",
+        "Attention Mechanisms", "Retrieval-Augmented Generation (RAG)", "OCR + LLM Integration", "YOLOv5"
+      ],
+      "data_science": [
+        "Data Analysis", "EDA", "Feature Engineering", "Statistical Modeling", "Predictive Modeling", "Ensemble Methods", "Model Evaluation"
+      ],
+      "tools": ["VS Code", "Git", "GitHub", "Jupyter", "Postman", "Power BI", "Azure Vision", "MySQL", "MongoDB", "Pandas", "NumPy", "Matplotlib", "Seaborn"],
+      "web_dev": ["HTML5", "CSS3", "Flask", "React.js", "RESTful APIs"],
+      "others": ["API Development", "Model Deployment", "Data Preprocessing", "Competitive Programming"]
     },
-    "summary": "AI & ML Engineer skilled in Python, TensorFlow, PyTorch, Large Language Models (LLMs), Neural Networks, and Data Science, with expertise in Agentic AI using LangChain and Phidata. Proficient in Transformer Architecture, Attention Mechanisms, and RAG (Retrieval-Augmented Generation). Experienced in building scalable AI-driven solutions to solve real-world challenges. Passionate about advancing AI technologies through innovation and collaboration.",
-    "skills": {
-      "technical": {
-        "languages": ["Python", "C", "Java"],
-        "frameworks": ["TensorFlow", "PyTorch", "Scikit-learn", "Phidata", "LangChain", "n8n", "Flask"],
-        "ai_ml": ["Neural Networks", "Deep Learning", "Large Language Models (LLMs)", "Transformer Architecture", "Attention Mechanisms", "RAG", "NLP", "Agentic AI"],
-        "data_science": ["Data Analysis", "Data Visualization", "Statistical Modeling", "Feature Engineering", "Predictive Modeling"],
-        "tools": ["Jupyter", "Azure Vision", "Power BI", "Pandas", "NumPy", "Matplotlib", "Seaborn"],
-        "others": ["Model Deployment", "Data Preprocessing", "API Development"]
-      },
-      "soft_skills": ["Creativity", "Critical Thinking", "Leadership", "Problem Solving", "Collaboration", "Time Management"]
+    "soft_skills": ["Creativity", "Critical Thinking", "Leadership", "Problem Solving", "Collaboration", "Time Management"]
+  },
+  "education": [
+    {
+      "degree": "B.Tech in AI & ML",
+      "institution": "Saveetha Engineering College, Chennai",
+      "year": "2022–2026",
+      "score": "CGPA: 7.5/10",
+      "status": "Currently pursuing"
     },
-    "education": [
-      {
-        "degree": "B.Tech in AI & ML",
-        "institution": "Saveetha Engineering College",
-        "year": "2022–2026",
-        "status": "Currently pursuing"
-      },
-      {
-        "degree": "HSC (12th Grade)",
-        "institution": "Vidhya Giri HR. Sec. School",
-        "year": "2022",
-        "score": "89.5%"
-      }
-    ],
-    "certifications": [
-      "Generative AI Course by GUVI",
-      "Introduction to Deep Learning by Infosys SpringBoard",
-      "Artificial Intelligence Bootcamp by NOVITech R&D",
-      "Power BI Workshop by Tech Tips"
-    ],
-    "projects": [
-      {
-        "title": "Power BI Dashboard for Sales Data Analysis",
-        "date": "June 2024",
-        "description": "Designed an interactive dashboard for e-commerce sales analysis, leveraging data visualization and statistical insights to drive business decisions."
-      },
-      {
-        "title": "Medical Chatbot (Combining Traditional and Gen AI)",
-        "date": "Sept 2024",
-        "description": "Developed a Flask-based chatbot with LLaMA 3.1 and RAG (Retrieval-Augmented Generation) for medical diagnoses."
-      },
-      {
-        "title": "AI-Powered Quiz Maker App",
-        "date": "Aug 2024",
-        "description": "Built an AI-powered app to generate quizzes using NLP and LLMs."
-      },
-      {
-        "title": "Temperature Prediction Model",
-        "date": "Sept 2024",
-        "description": "Created a stacked ensemble model (LGBM, RandomForest, AdaBoost) for weather forecasting using Neural Networks. Applied feature engineering and data preprocessing to improve model accuracy."
-      },
-      {
-        "title": "Contextual Spell Correction using LLaMA",
-        "date": "July 2024",
-        "description": "Implemented spell correction for Excel datasets using LLM. Leveraged data science workflows for cleaning and transforming text data."
-      }
-    ],
-    "experience": [
-      {
-        "position": "AI/ML Intern",
-        "company": "AI and ML InternPe",
-        "duration": "Apr 2024 – May 2024",
-        "description": "Worked on AI/ML projects using Python, Scikit-learn, and data preprocessing. Applied data science techniques to analyze and visualize datasets."
-      },
-      {
-        "position": "AIML Engineer",
-        "company": "Winvinaya Infosystem, Bangalore",
-        "duration": "July 2024",
-        "description": "Enhanced data processing with spell correction and multi-language text extraction using advanced AI techniques like NLP and LLMs. Utilized data science methodologies for data cleaning and transformation."
-      }
-    ],
-    "hackathon_experience": [
-      "IIT Shaastra’s AIML Challenge 1 & 2",
-      "SRMIST Datathon",
-      "Intel oneAPI Hackathon",
-      "IBM Z Datathon",
-      "Industrial AI Hackathon (IIT Madras)"
-    ]
-  }
+    {
+      "degree": "HSC (12th Grade)",
+      "institution": "Vidhya Giri HR. Sec. School, Karaikudi",
+      "year": "2022",
+      "score": "89.5%"
+    }
+  ],
+  "experience": [
+    {
+      "position": "AIML Engineer",
+      "company": "Winvinaya Infosystem, Bangalore",
+      "duration": "July 2024",
+      "description": [
+        "Automated spell correction in Excel using LLMs, reducing manual effort by 80%.",
+        "Built multilingual OCR pipeline using Azure OCR and LLMs for contextual text correction.",
+        "Developed layout-aware OCR for varied formats.",
+        "Explored fine-tuning Transformers for HTML layout classification to assist VI-accessible conversion."
+      ]
+    },
+    {
+      "position": "AI/ML Intern",
+      "company": "AI and ML InternPe",
+      "duration": "Apr 2024 – May 2024",
+      "description": [
+        "Worked on AI/ML projects using Python and Scikit-learn.",
+        "Handled data preprocessing, feature engineering, and data visualization."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "title": "Medolla: AI Medical Chatbot",
+      "description": "Built a GenAI chatbot combining YOLOv5 for pathology detection, OCR for report parsing, and RAG via LangChain for interactive medical Q&A."
+    },
+    {
+      "title": "Verba Vision Pro (OCR + LLM)",
+      "description": "Integrated Azure OCR with LLMs for multilingual document parsing and contextual spell correction, supporting scanned tables and formats."
+    },
+    {
+      "title": "T5 Summarizer with LoRA (PEFT)",
+      "description": "Fine-tuned T5 using LoRA for summarization, evaluated via ROUGE metrics, and deployed with Gradio."
+    },
+    {
+      "title": "Transformers from Scratch",
+      "description": "Implemented Transformer architecture in PyTorch including multi-head attention, masking, and training loop from scratch."
+    },
+    {
+      "title": "Temperature Prediction Pipeline",
+      "description": "Built an end-to-end ML pipeline using LightGBM, XGBoost, and AdaBoost, incorporating feature selection, tuning, and evaluation."
+    },
+    {
+      "title": "Power BI Dashboard for Sales Data",
+      "description": "Designed an interactive Power BI dashboard for e-commerce sales insights and statistical business analysis."
+    }
+  ],
+  "achievements": [
+    "1st Place Winner in Inter-ML College Hackathon",
+    "Top 30 in Kaggle Competitions for data science performance",
+    "Finalist in SRMIST Datathon",
+    "Runner-Up in Inter-College Science Quiz"
+  ]
+}
 
-# --- RAG Setup ---
+
+# --- RAG Setup (omitted for brevity, same as before) ---
 def process_resume_data(resume_data: Dict[str, Any]) -> List[str]:
-    """Flattens the resume JSON into a list of strings for retrieval."""
     docs = []
     for section, content in resume_data.items():
         if isinstance(content, dict):
             for key, value in content.items():
-                if isinstance(value, list):
-                    docs.append(f"{section} - {key}: {', '.join(value)}")
+                if isinstance(value, list): docs.append(f"{section} - {key}: {', '.join(value)}")
                 elif isinstance(value, dict):
                     for sub_key, sub_value in value.items():
-                        if isinstance(sub_value, list):
-                            docs.append(f"{section} - {key} - {sub_key}: {', '.join(sub_value)}")
-                else:
-                    docs.append(f"{section} - {key}: {value}")
+                        if isinstance(sub_value, list): docs.append(f"{section} - {key} - {sub_key}: {', '.join(sub_value)}")
+                else: docs.append(f"{section} - {key}: {value}")
         elif isinstance(content, list):
             for item in content:
-                if isinstance(item, dict):
-                    doc_str = ', '.join([f"{k}: {v}" for k, v in item.items()])
-                    docs.append(f"{section}: {doc_str}")
-                else:
-                    docs.append(f"{section}: {item}")
-        else:
-            docs.append(f"{section}: {content}")
+                if isinstance(item, dict): docs.append(f"{section}: {', '.join([f'{k}: {v}' for k, v in item.items()])}")
+                else: docs.append(f"{section}: {item}")
+        else: docs.append(f"{section}: {content}")
     return docs
 
 documents = process_resume_data(resume_json)
 tokenized_corpus = [doc.lower().split() for doc in documents]
-
 vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
 tfidf_matrix = vectorizer.fit_transform(documents)
 bm25 = BM25Okapi(tokenized_corpus)
 
 def retrieve_documents(query: str, top_k: int = TOP_K_RETRIEVAL) -> List[str]:
-    """Retrieves relevant documents using a hybrid BM25 and TF-IDF approach."""
     tokenized_query = query.lower().split()
-    
-    # BM25 scores
     bm25_scores = bm25.get_scores(tokenized_query)
-    
-    # TF-IDF scores
     query_vector = vectorizer.transform([query])
     tfidf_scores = (tfidf_matrix @ query_vector.T).toarray().flatten()
-
-    # Normalize scores before combining
     norm_bm25 = bm25_scores / (np.max(bm25_scores) + 1e-9)
     norm_tfidf = tfidf_scores / (np.max(tfidf_scores) + 1e-9)
-
     combined_scores = (BM25_WEIGHT * norm_bm25) + (TFIDF_WEIGHT * norm_tfidf)
-    
-    # Get top_k indices
     num_docs = len(documents)
-    if num_docs == 0:
-        return []
-    
+    if num_docs == 0: return []
     ranked_indices = combined_scores.argsort()[::-1]
     top_indices = ranked_indices[:min(top_k, num_docs)]
-    
     return [documents[i] for i in top_indices]
 
-# --- Agent Setup ---
+# --- Agent Setup with History ---
 class AgentState(TypedDict):
-    memory: ConversationBufferWindowMemory
     user_query: str
+    chat_history: List[BaseMessage] # Use chat_history instead of memory
+    response: str # Add a field to store the final response
 
-personal_ai = ChatGroq(
-    temperature=LLM_TEMPERATURE,
-    model=LLM_MODEL,
-    api_key=GROQ_API_KEY,
-)
+personal_ai = ChatGroq(temperature=LLM_TEMPERATURE, model=LLM_MODEL, api_key=GROQ_API_KEY)
 
-SYSTEM_PROMPT_TEMPLATE = """You are **Mithun MS's Personal AI Assistant**, designed to represent his portfolio in a smart and conversational way.
+SYSTEM_PROMPT_TEMPLATE = """You are **Mithun MS's Personal AI Assistant**. Use the following conversation history and resume context to answer the user's question.
 
-🎯 **Your Objective:**
-- Act as a polite and professional assistant representing Mithun.
-- **Strictly use only the provided resume data** to answer all questions. Do not invent or assume any information.
-- Your goal is to help users, like recruiters or collaborators, learn about Mithun's skills and experience.
+**Conversation History:**
+{chat_history}
 
----
-📄 **Context (Retrieved from Mithun's Resume):**
+**Resume Context:**
 {retrieved_context}
----
 
-🧠 **Conversation History:**
-{conversation_history}
----
-
-📌 **Interaction Rules:**
-1.  **First Greeting:** Greet the user warmly on their very first message only. Since this is a stateless agent, this means you will greet every user.
-2.  **Concise & Clear:** Always answer concisely, but with enough detail to be useful. Use **bold styling (with asterisks)** to highlight key terms, technologies, or achievements.
-3.  **Handle Missing Info:** If the answer is not in the provided context, you MUST reply with: "I don't have that specific information in Mithun's resume."
-4.  **Closing Prompt:** If the user says "ok", "thanks", "thank you", or similar signs of ending the conversation, respond with: "You're welcome! Is there anything else I can help you with regarding Mithun's profile?"
-5.  **Tone:** Maintain a friendly, crisp, and helpful tone throughout the conversation.
+**User's Question:**
+{user_query}
 """
+prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT_TEMPLATE),
+    ("human", "{user_query}")
+])
 
 def agent_node(state: AgentState) -> Dict[str, Any]:
-    """The main node of the agent that processes the user query."""
-    memory = state["memory"]
+    """The main node of the agent that processes the user query with history."""
     query = state["user_query"]
+    history = state["chat_history"]
 
     retrieved_docs = retrieve_documents(query)
     retrieved_context = "\n- ".join(retrieved_docs)
     logger.debug(f"Query: '{query}' | Retrieved Context:\n- {retrieved_context}")
 
-    # Since memory is new for each call, history will be empty.
-    convo_history = "\n".join([f"{m.type.upper()}: {m.content}" for m in memory.chat_memory.messages])
+    chain = prompt | personal_ai
 
-    formatted_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        retrieved_context=retrieved_context,
-        conversation_history=convo_history
-    )
+    response = chain.invoke({
+        "chat_history": history,
+        "retrieved_context": retrieved_context,
+        "user_query": query
+    })
 
-    response = personal_ai.invoke([
-        AIMessage(content=formatted_prompt),
-        HumanMessage(content=query)
-    ])
-
-    memory.save_context({"input": query}, {"output": response.content})
-    return {"memory": memory}
+    # The graph will store the final response in the state
+    return {"response": response.content}
 
 # --- Graph Compilation ---
 workflow = StateGraph(AgentState)
 workflow.add_node("agent", agent_node)
 workflow.set_entry_point("agent")
 workflow.add_edge("agent", END)
-compiled_app = workflow.compile()
+graph = workflow.compile()
 
-# --- Main Entry for Flask (Stateless) ---
-def personal_ai_agent(query: str) -> Dict[str, Any]:
+# --- Main Entry Point for Flask ---
+def personal_ai_agent(query: str, chat_history: BaseChatMessageHistory) -> Dict[str, Any]:
     """
-    Invokes the compiled agent graph for a single, stateless interaction.
-    A new memory object is created for each call.
+    Invokes the agent graph with stateful history from Redis.
     """
-    # Create a new memory object for each request
-    memory = ConversationBufferWindowMemory(
-        k=MEMORY_WINDOW_SIZE,
-        return_messages=True
+    # Wrap the graph with message history management
+    agent_with_history = RunnableWithMessageHistory(
+        graph,
+        lambda session_id: chat_history, # Use the history object passed from Flask
+        input_messages_key="user_query",
+        history_messages_key="chat_history",
+        output_messages_key="response" # The key in the state holding the final response
     )
 
-    result = compiled_app.invoke({
-        "memory": memory,
-        "user_query": query
-    })
-    
-    # The last message in memory is the AI's latest response
-    response_content = result["memory"].chat_memory.messages[-1].content
-    return {"response": response_content}
+    # Invoke the agent. The session_id is managed by the RedisChatMessageHistory object.
+    result = agent_with_history.invoke(
+        {"user_query": query},
+        config={"configurable": {"session_id": chat_history.session_id}}
+    )
+
+    # The result is now the direct response content from the AI
+    return {"response": result}
