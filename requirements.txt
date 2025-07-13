@@ -8,4 +8,5 @@ langchain-groq
 scikit-learn
 rank-bm25
 numpy
+redis
 gunicorn
