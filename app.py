@@ -26,7 +26,7 @@ app = Flask(__name__)
 # Load configuration from environment variables with sensible defaults
 FLASK_ENV = os.getenv("FLASK_ENV", "production")
 DEBUG_MODE = FLASK_ENV == "development"
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://default:oTkDq0Dfd3p0UZyKiRDgnWmx0PfjgpNX@redis-12966.c266.us-east-1-3.ec2.redns.redis-cloud.com:12966")
 
 # Set up CORS based on environment variable, splitting by comma
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://mithunms.netlify.app").split(',')
