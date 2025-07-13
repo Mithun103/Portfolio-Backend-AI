@@ -1,12 +1,9 @@
-# agent.py
 import os
 import logging
 import numpy as np
 from dotenv import load_dotenv
 from typing import TypedDict, List, Dict, Any
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_groq import ChatGroq
@@ -34,8 +31,7 @@ LLM_MODEL = "llama3-70b-8192"
 LLM_TEMPERATURE = 0.3
 
 # --- Resume Data ---
-# It's better to load this from a separate resume.json file
-# For this example, we'll keep it here.
+# In a real application, it's better to load this from a separate JSON file.
 resume_json = {
     "personal_info": {
       "name": "Mithun MS",
@@ -135,27 +131,23 @@ def process_resume_data(resume_data: Dict[str, Any]) -> List[str]:
     docs = []
     for section, content in resume_data.items():
         if isinstance(content, dict):
-            # For personal_info and skills
             for key, value in content.items():
                 if isinstance(value, list):
                     docs.append(f"{section} - {key}: {', '.join(value)}")
                 elif isinstance(value, dict):
                     for sub_key, sub_value in value.items():
-                         if isinstance(sub_value, list):
-                             docs.append(f"{section} - {key} - {sub_key}: {', '.join(sub_value)}")
+                        if isinstance(sub_value, list):
+                            docs.append(f"{section} - {key} - {sub_key}: {', '.join(sub_value)}")
                 else:
                     docs.append(f"{section} - {key}: {value}")
         elif isinstance(content, list):
-            # For projects, experience, education, etc.
             for item in content:
                 if isinstance(item, dict):
                     doc_str = ', '.join([f"{k}: {v}" for k, v in item.items()])
                     docs.append(f"{section}: {doc_str}")
                 else:
-                    # For simple lists like certifications
                     docs.append(f"{section}: {item}")
         else:
-            # For top-level fields like summary
             docs.append(f"{section}: {content}")
     return docs
 
@@ -177,13 +169,13 @@ def retrieve_documents(query: str, top_k: int = TOP_K_RETRIEVAL) -> List[str]:
     query_vector = vectorizer.transform([query])
     tfidf_scores = (tfidf_matrix @ query_vector.T).toarray().flatten()
 
-    # Normalize scores to be in a similar range (e.g., 0-1) before combining
+    # Normalize scores before combining
     norm_bm25 = bm25_scores / (np.max(bm25_scores) + 1e-9)
     norm_tfidf = tfidf_scores / (np.max(tfidf_scores) + 1e-9)
 
     combined_scores = (BM25_WEIGHT * norm_bm25) + (TFIDF_WEIGHT * norm_tfidf)
     
-    # Get top_k indices, handling cases where there are fewer docs than top_k
+    # Get top_k indices
     num_docs = len(documents)
     if num_docs == 0:
         return []
@@ -221,7 +213,7 @@ SYSTEM_PROMPT_TEMPLATE = """You are **Mithun MS's Personal AI Assistant**, desig
 ---
 
 📌 **Interaction Rules:**
-1.  **First Greeting:** Greet the user warmly on their very first message only.
+1.  **First Greeting:** Greet the user warmly on their very first message only. Since this is a stateless agent, this means you will greet every user.
 2.  **Concise & Clear:** Always answer concisely, but with enough detail to be useful. Use **bold styling (with asterisks)** to highlight key terms, technologies, or achievements.
 3.  **Handle Missing Info:** If the answer is not in the provided context, you MUST reply with: "I don't have that specific information in Mithun's resume."
 4.  **Closing Prompt:** If the user says "ok", "thanks", "thank you", or similar signs of ending the conversation, respond with: "You're welcome! Is there anything else I can help you with regarding Mithun's profile?"
@@ -237,6 +229,7 @@ def agent_node(state: AgentState) -> Dict[str, Any]:
     retrieved_context = "\n- ".join(retrieved_docs)
     logger.debug(f"Query: '{query}' | Retrieved Context:\n- {retrieved_context}")
 
+    # Since memory is new for each call, history will be empty.
     convo_history = "\n".join([f"{m.type.upper()}: {m.content}" for m in memory.chat_memory.messages])
 
     formatted_prompt = SYSTEM_PROMPT_TEMPLATE.format(
@@ -259,13 +252,23 @@ workflow.set_entry_point("agent")
 workflow.add_edge("agent", END)
 compiled_app = workflow.compile()
 
-# --- Main Entry for Flask ---
-def personal_ai_agent(query: str, memory: ConversationBufferWindowMemory) -> Dict[str, Any]:
-    """Invokes the compiled agent graph and returns the response."""
+# --- Main Entry for Flask (Stateless) ---
+def personal_ai_agent(query: str) -> Dict[str, Any]:
+    """
+    Invokes the compiled agent graph for a single, stateless interaction.
+    A new memory object is created for each call.
+    """
+    # Create a new memory object for each request
+    memory = ConversationBufferWindowMemory(
+        k=MEMORY_WINDOW_SIZE,
+        return_messages=True
+    )
+
     result = compiled_app.invoke({
         "memory": memory,
         "user_query": query
     })
+    
     # The last message in memory is the AI's latest response
     response_content = result["memory"].chat_memory.messages[-1].content
     return {"response": response_content}
