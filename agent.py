@@ -35,7 +35,7 @@ if not GROQ_API_KEY:
 TOP_K_RETRIEVAL = 8
 BM25_WEIGHT = 0.7
 TFIDF_WEIGHT = 0.3
-LLM_MODEL = "llama3-70b-8192"
+LLM_MODEL = "llama-3.3-70b-versatile"
 LLM_TEMPERATURE = 0.3
 
 # --- Resume Data (omitted for brevity, same as before) ---
@@ -253,3 +253,4 @@ def personal_ai_agent(query: str, chat_history: BaseChatMessageHistory) -> Dict[
 
     # The result is now the direct response content from the AI
     return {"response": result}
+
