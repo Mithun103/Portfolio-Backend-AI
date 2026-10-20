@@ -35,7 +35,7 @@ if not GROQ_API_KEY:
 TOP_K_RETRIEVAL = 8
 BM25_WEIGHT = 0.7
 TFIDF_WEIGHT = 0.3
-LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_MODEL = "openai/gpt-oss-120b"
 LLM_TEMPERATURE = 0.3
 
 # --- Resume Data (omitted for brevity, same as before) ---
